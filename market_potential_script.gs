@@ -1,7 +1,7 @@
 /**
  * @OnlyCurrentDoc
  *
- * This script adds a custom menu to highlight rows based on potential.
+ * This script adds a custom menu to highlight and sort rows based on market potential.
  */
 
 // Define the colors for highlighting
@@ -15,6 +15,8 @@ const MIDDLE_NAME = "2 - Medium Value Market";
 const LOWER_NAME = "3 - Lower Volume Market";
 const OTHER_NAME = ""; // Or "Other" if you prefer
 const CATEGORY_HEADER = "Market Category";
+const SORT_KEY_HEADER = "_SortKey"; // Helper column for sorting
+const SORTED_SHEET_NAME = "Sorted Market Analysis"; // Define the output sheet name
 
 /**
  * Creates a custom menu in the spreadsheet when the file is opened.
@@ -22,42 +24,48 @@ const CATEGORY_HEADER = "Market Category";
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Market Analysis')
-    .addItem('Highlight Potentials', 'highlightPotentials')
-    .addItem('Sort by Potential', 'sortPotentials')
+    .addItem('Highlight Potentials (On This Sheet)', 'highlightPotentials')
+    .addItem('Sort & Highlight (To New Sheet)', 'sortPotentials')
     .addToUi();
 }
 
 /**
- * Ensures the "Market Category" column exists, adding it if not.
+ * Ensures helper columns exist, adding them if not.
  * @param {Sheet} sheet The active Google Sheet.
- * @return {number} The 0-based index of the "Market Category" column, or -1 if user needs to re-run.
+ * @return {boolean} True if columns are ready, false if something failed.
  */
-function ensureCategoryColumn(sheet) {
+function ensureHelperColumns(sheet) {
+  Logger.log("Running ensureHelperColumns...");
   const ui = SpreadsheetApp.getUi();
   const headerRange = sheet.getRange(2, 1, 1, sheet.getLastColumn());
-  const headers = headerRange.getValues()[0];
-  let colIndex = headers.indexOf(CATEGORY_HEADER);
+  let headers = headerRange.getValues()[0];
+  let colAdded = false;
 
-  if (colIndex === -1) {
-    // Column not found, add it
-    try {
-      const newColIndex = sheet.getLastColumn() + 1;
-      sheet.getRange(2, newColIndex).setValue(CATEGORY_HEADER);
-      // Immediately fetch the new headers to confirm
-      const newHeaders = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
-      colIndex = newHeaders.indexOf(CATEGORY_HEADER);
-      if (colIndex === -1) {
-         ui.alert(`Failed to add "${CATEGORY_HEADER}" column. Please add it manually and re-run.`);
-         return -1;
+  const columnsToVerify = [CATEGORY_HEADER, SORT_KEY_HEADER];
+
+  columnsToVerify.forEach(headerName => {
+    if (headers.indexOf(headerName) === -1) {
+      Logger.log(`Column "${headerName}" not found, attempting to add it.`);
+      // Column not found, add it
+      try {
+        const newColIndex = sheet.getLastColumn() + 1;
+        sheet.getRange(2, newColIndex).setValue(headerName);
+        colAdded = true;
+        Logger.log(`Column "${headerName}" added successfully.`);
+      } catch (e) {
+        Logger.log(`ERROR adding column "${headerName}": ${e.message}`);
+        ui.alert(`Could not add "${headerName}" column. Error: ${e.message}. Please add it manually on row 2 and re-run.`);
+        return false; // Stop this helper
       }
-      SpreadsheetApp.flush(); // Ensure the change is committed
-      return colIndex; // Return the new, correct index
-    } catch (e) {
-      ui.alert(`Could not add "${CATEGORY_HEADER}" column. Error: ${e.message}. Please add it manually on row 2 and re-run.`);
-      return -1;
     }
+  });
+
+  if (colAdded) {
+    Logger.log("Columns were added, flushing sheet.");
+    SpreadsheetApp.flush(); // Ensure changes are committed
   }
-  return colIndex;
+  Logger.log("ensureHelperColumns finished.");
+  return true; // All columns should be ready
 }
 
 /**
@@ -66,26 +74,35 @@ function ensureCategoryColumn(sheet) {
  * @return {object} An object mapping rule names to column indices, or null if headers aren't ready.
  */
 function getColumnIndices(sheet) {
+  Logger.log("Running getColumnIndices...");
+  if (!ensureHelperColumns(sheet)) {
+    Logger.log("ensureHelperColumns returned false.");
+    return null; // Stop execution, error was shown
+  }
+  
+  // Re-fetch headers *after* columns might have been added
   const headerRange = sheet.getRange(2, 1, 1, sheet.getLastColumn());
   const headers = headerRange.getValues()[0];
+  Logger.log("Headers found: " + headers.join(", "));
   let colIndices = findHeaderColumns(headers);
+  Logger.log("Column indices found: " + JSON.stringify(colIndices));
 
-  // Check if Market Category is missing
-  if (colIndices.marketCategory === -1) {
-    const categoryColIndex = ensureCategoryColumn(sheet);
-    if (categoryColIndex === -1) {
-      return null; // Stop execution, user was alerted or error occurred
-    }
-    // Re-fetch headers if we just added one
-    const newHeaders = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
-    colIndices = findHeaderColumns(newHeaders);
+
+  // Final check
+  if (colIndices.marketCategory === -1 || colIndices.sortKey === -1) {
+     Logger.log("ERROR: Helper columns not found after creation attempt.");
+     SpreadsheetApp.getUi().alert(`Failed to find or create helper columns. Please manually add "${CATEGORY_HEADER}" and "${SORT_KEY_HEADER}" to row 2 and re-run.`);
+     return null;
   }
+  
+  Logger.log("getColumnIndices finished successfully.");
   return colIndices;
 }
 
 
 /**
  * Main function to find and highlight high and medium potential rows.
+ * This function just highlights; it does not sort.
  */
 function highlightPotentials() {
   const ui = SpreadsheetApp.getUi();
@@ -93,6 +110,11 @@ function highlightPotentials() {
   
   if (!sheet) {
     ui.alert("No active sheet found.");
+    return;
+  }
+  
+  if (sheet.getName() === SORTED_SHEET_NAME) {
+    ui.alert("This function highlights the raw data sheet. The sorted sheet is already highlighted.");
     return;
   }
 
@@ -105,12 +127,12 @@ function highlightPotentials() {
 
   let colIndices = getColumnIndices(sheet);
   if (!colIndices) {
-    return; // Stop if ensureCategoryColumn failed or told user to re-run
+    return; // Stop if ensureHelperColumns failed
   }
   
   // Check if all *other* required columns were found
   const missingCols = Object.keys(colIndices)
-                           .filter(key => key !== 'marketCategory' && colIndices[key] === -1);
+                           .filter(key => key !== 'marketCategory' && key !== 'sortKey' && colIndices[key] === -1);
                            
   if (missingCols.length > 0) {
     ui.alert(`Error: Could not find the following required columns: ${missingCols.join(", ")}. Please check the header names on Row 2.`);
@@ -124,6 +146,7 @@ function highlightPotentials() {
   let middleMarketRanges = [];
   let lowerPotentialRanges = [];
   const categoryValues = []; // Array to hold the category names for batch writing
+  const sortKeyValues = []; // Array to hold the sort keys
   const numCols = sheet.getLastColumn();
 
   // Define the range for data rows (excluding headers)
@@ -140,35 +163,37 @@ function highlightPotentials() {
     const totalSold = Number(row[colIndices.totalSold]);
     const percentOver200k = Number(row[colIndices.percentOver200k]);
     const percentUnder10k = Number(row[colIndices.percentUnder10k]);
-
-    // Skip rows with invalid data
-    if (isNaN(sellThroughRate) || isNaN(totalSold) || isNaN(percentOver200k) || isNaN(percentUnder10k)) {
-      categoryValues.push([OTHER_NAME]); // Push empty category
-      continue; 
-    }
-    
-    const rowNum = i + 2; // +2 because values index 1 is Row 3
-    const rowRangeA1 = sheet.getRange(rowNum, 1, 1, numCols).getA1Notation();
     
     let categoryName = OTHER_NAME;
+    let categoryKey = 4; // 4 = Other (default)
 
-    // Rule 1: Expansive Market
-    if (sellThroughRate > 0.9 && totalSold > 100 && percentOver200k >= 0.4) {
-      expansiveMarketRanges.push(rowRangeA1);
-      categoryName = EXPANSIVE_NAME;
-    } 
-    // Rule 2: Middle Market
-    else if (sellThroughRate > 0.9 && totalSold > 150 && percentUnder10k <= 0.1) {
-      middleMarketRanges.push(rowRangeA1);
-      categoryName = MIDDLE_NAME;
-    }
-    // Rule 3: Lower Potential
-    else if (sellThroughRate > 0.8 && totalSold > 60 && percentUnder10k <= 0.1) {
-      lowerPotentialRanges.push(rowRangeA1);
-      categoryName = LOWER_NAME;
+    // Skip rows with invalid data
+    if (!isNaN(sellThroughRate) && !isNaN(totalSold) && !isNaN(percentOver200k) && !isNaN(percentUnder10k)) {
+      const rowNum = i + 2; // +2 because values index 1 is Row 3
+      const rowRangeA1 = sheet.getRange(rowNum, 1, 1, numCols).getA1Notation();
+
+      // Rule 1: Expansive Market
+      if (sellThroughRate > 0.9 && totalSold > 100 && percentOver200k >= 0.4) {
+        expansiveMarketRanges.push(rowRangeA1);
+        categoryName = EXPANSIVE_NAME;
+        categoryKey = 1;
+      } 
+      // Rule 2: Middle Market
+      else if (sellThroughRate > 0.9 && totalSold > 150 && percentUnder10k <= 0.1) {
+        middleMarketRanges.push(rowRangeA1);
+        categoryName = MIDDLE_NAME;
+        categoryKey = 2;
+      }
+      // Rule 3: Lower Potential
+      else if (sellThroughRate > 0.8 && totalSold > 60 && percentUnder10k <= 0.1) {
+        lowerPotentialRanges.push(rowRangeA1);
+        categoryName = LOWER_NAME;
+        categoryKey = 3;
+      }
     }
     
     categoryValues.push([categoryName]); // Add the category name for this row
+    sortKeyValues.push([categoryKey]); // Add the sort key for this row
   }
 
   // Apply formatting in batches
@@ -182,128 +207,198 @@ function highlightPotentials() {
     sheet.getRangeList(lowerPotentialRanges).setBackground(LOWER_POTENTIAL_COLOR);
   }
   
-  // Write all category names to the "Market Category" column
+  // Write all category names and sort keys to their columns
   if (categoryValues.length > 0) {
     sheet.getRange(3, colIndices.marketCategory + 1, categoryValues.length, 1).setValues(categoryValues);
+    sheet.getRange(3, colIndices.sortKey + 1, sortKeyValues.length, 1).setValues(sortKeyValues);
   }
 
   ui.alert(`Highlighting complete! Found ${expansiveMarketRanges.length} Expansive, ${middleMarketRanges.length} Medium Value, and ${lowerPotentialRanges.length} Lower Volume rows.`);
 }
 
 /**
- * New function to sort the sheet by potential category and sell-through rate.
+ * Sorts the sheet by potential and outputs to a NEW sheet.
+ * THIS VERSION SORTS IN JAVASCRIPT AND WRITES TO A NEW SHEET.
  */
 function sortPotentials() {
+  Logger.log("--- Running sortPotentials ---");
   const ui = SpreadsheetApp.getUi();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet(); // Get the whole workbook
+  const activeSheet = spreadsheet.getActiveSheet(); // This is the SOURCE sheet
   
-  if (!sheet) {
+  if (!activeSheet) {
+    Logger.log("Exiting: No active sheet found.");
     ui.alert("No active sheet found.");
     return;
   }
+  Logger.log("Active sheet: " + activeSheet.getName());
 
-  const lastRow = sheet.getLastRow();
+  const lastRow = activeSheet.getLastRow();
+  const lastCol = activeSheet.getLastColumn();
   if (lastRow < 3) {
+    Logger.log("Exiting: Not enough data in the sheet.");
     ui.alert("Not enough data in the sheet to sort. This script expects headers on row 2 and data starting on row 3.");
     return;
   }
 
-  ui.alert("Sorting rows... This may take a moment. Highlights will be reapplied automatically when sorting is complete.");
+  ui.alert("Categorizing and sorting data... A new sheet named '" + SORTED_SHEET_NAME + "' will be created with the results.");
 
-  let colIndices = getColumnIndices(sheet);
+  // --- 1. Get Column Indices from SOURCE sheet ---
+  Logger.log("Getting column indices...");
+  let colIndices = getColumnIndices(activeSheet); 
   if (!colIndices) {
-    return; // Stop if ensureCategoryColumn failed
+    Logger.log("Exiting: colIndices is null.");
+    return; // Stop if ensureHelperColumns failed (it shows its own alert)
   }
+  Logger.log("Column indices: " + JSON.stringify(colIndices));
+
   
-  // Check if all *other* required columns were found
   const missingCols = Object.keys(colIndices)
-                           .filter(key => key !== 'marketCategory' && colIndices[key] === -1);
+                           .filter(key => key !== 'marketCategory' && key !== 'sortKey' && colIndices[key] === -1);
                            
   if (missingCols.length > 0) {
+    Logger.log("Exiting: Missing required columns: " + missingCols.join(", "));
     ui.alert(`Error: Could not find the following required columns: ${missingCols.join(", ")}. Please check the header names on Row 2.`);
     return;
   }
-
-  // Get data starting from Row 2 (headers)
-  const dataRange = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
-  let values = dataRange.getValues();
   
-  const headers = values[0]; // Row 2
-  // Get only the data rows (from row 3 onwards)
-  const dataRows = values.slice(1);
-  let sortableData = [];
+  // --- 2. Read Headers and Data from SOURCE sheet ---
+  Logger.log("Reading header and data values...");
+  const headerValues = activeSheet.getRange(1, 1, 2, lastCol).getValues();
+  const dataValues = activeSheet.getRange(3, 1, lastRow - 2, lastCol).getValues();
+  Logger.log(`Read ${headerValues.length} header rows and ${dataValues.length} data rows.`);
+  
+  let sortableData = []; // Array to hold objects for sorting
 
-  // Loop through data rows and assign a category and sell-through rate
-  for (let i = 0; i < dataRows.length; i++) {
-    const row = dataRows[i];
+  // --- 3. Calculate and Sort *in memory* (same logic as before) ---
+  Logger.log("Categorizing and sorting in memory...");
+  for (let i = 0; i < dataValues.length; i++) {
+    const row = dataValues[i];
     
     const sellThroughRate = Number(row[colIndices.sellThrough]);
     const totalSold = Number(row[colIndices.totalSold]);
     const percentOver200k = Number(row[colIndices.percentOver200k]);
     const percentUnder10k = Number(row[colIndices.percentUnder10k]);
 
-    let category = 4; // 4 = Other (default)
     let categoryName = OTHER_NAME;
-    let sellThrough = isNaN(sellThroughRate) ? -1 : sellThroughRate;
+    let categoryKey = 4; // 4 = Other (default)
 
     if (!isNaN(sellThroughRate) && !isNaN(totalSold) && !isNaN(percentOver200k) && !isNaN(percentUnder10k)) {
       // Rule 1: Expansive Market
       if (sellThroughRate > 0.9 && totalSold > 100 && percentOver200k >= 0.4) {
-        category = 1;
         categoryName = EXPANSIVE_NAME;
+        categoryKey = 1;
       } 
       // Rule 2: Middle Market
       else if (sellThroughRate > 0.9 && totalSold > 150 && percentUnder10k <= 0.1) {
-        category = 2;
         categoryName = MIDDLE_NAME;
+        categoryKey = 2;
       }
       // Rule 3: Lower Potential
       else if (sellThroughRate > 0.8 && totalSold > 60 && percentUnder10k <= 0.1) {
-        category = 3;
         categoryName = LOWER_NAME;
+        categoryKey = 3;
       }
     }
     
-    // Write the category name directly into the row data
+    // Update the row *in memory* with the new category data
     row[colIndices.marketCategory] = categoryName;
+    row[colIndices.sortKey] = categoryKey;
     
+    // Add to our sortable array
     sortableData.push({
-      data: row, // This row data now includes the category name
-      category: category,
-      sellThrough: sellThrough
+      row: row,
+      sortKey: categoryKey,
+      sellThrough: sellThroughRate
     });
   }
 
-  // Sort the data
+  // Sort the data *in memory*
   sortableData.sort((a, b) => {
-    // Primary sort: by category (1, 2, 3, 4)
-    if (a.category !== b.category) {
-      return a.category - b.category;
+    if (a.sortKey !== b.sortKey) {
+      return a.sortKey - b.sortKey; // Ascending by category (1, 2, 3)
     }
-    // Secondary sort: by sell-through rate (descending)
+    // If keys are the same, sort by sell-through descending
     return b.sellThrough - a.sellThrough;
   });
 
-  // Get the sorted data back into a 2D array
-  const sortedValues = sortableData.map(item => item.data);
+  // Extract the sorted row data
+  const sortedValues = sortableData.map(item => item.row); // This is our final data
+  Logger.log(`Sort complete. ${sortedValues.length} rows sorted.`);
+
+
+  // --- 4. Create the NEW Sheet ---
+  Logger.log("Attempting to delete old sorted sheet if it exists...");
+  let sortedSheet = spreadsheet.getSheetByName(SORTED_SHEET_NAME);
+  if (sortedSheet) {
+    spreadsheet.deleteSheet(sortedSheet);
+    SpreadsheetApp.flush(); // Make sure deletion is complete
+    Logger.log("Old sheet deleted.");
+  }
   
-  // Define the range to write to (Row 3 to end)
-  const numRows = sortedValues.length;
-  if (numRows === 0) {
-    // This should be covered by the lastRow < 3 check, but good to have
+  Logger.log("Creating new sheet: " + SORTED_SHEET_NAME);
+  sortedSheet = spreadsheet.insertSheet(SORTED_SHEET_NAME);
+  spreadsheet.setActiveSheet(sortedSheet);
+  Logger.log("New sheet created and activated.");
+
+
+  // --- 5. Write Headers and Sorted Data to NEW Sheet ---
+  if (sortedValues.length > 0) {
+    Logger.log("Writing headers to new sheet...");
+    // Write Headers
+    sortedSheet.getRange(1, 1, 2, lastCol).setValues(headerValues);
+    Logger.log("Writing sorted data to new sheet...");
+    // Write Data
+    sortedSheet.getRange(3, 1, sortedValues.length, lastCol).setValues(sortedValues);
+    Logger.log("Data write complete. Flushing sheet.");
+    SpreadsheetApp.flush(); // FORCE the sheet to update
+  } else {
+    Logger.log("Exiting: No data rows found to sort.");
     ui.alert("No data rows found to sort.");
     return;
   }
-  const numCols = sortedValues[0].length;
-  const dataRegion = sheet.getRange(3, 1, numRows, numCols);
 
-  // Write the sorted data back to the sheet
-  dataRegion.setValues(sortedValues);
+  // --- 6. Format the NEW Sheet ---
+  Logger.log("Formatting new sheet (freezing panes, hiding column)...");
+  try {
+    sortedSheet.setFrozenRows(2);
+    sortedSheet.setFrozenColumns(1);
+    const sortKeyColNum = colIndices.sortKey + 1;
+    sortedSheet.hideColumns(sortKeyColNum);
+  } catch (e) {
+     Logger.log("Error formatting new sheet: " + e.message);
+  }
+  
+  // --- 7. Apply Highlights on NEW Sheet ---
+  Logger.log("Applying highlights to new sheet...");
+  let expansiveMarketRanges = [];
+  let middleMarketRanges = [];
+  let lowerPotentialRanges = [];
+  const newDataRegion = sortedSheet.getRange(3, 1, sortedValues.length, lastCol);
 
-  // Re-apply the highlights, which will now match the new row order
-  // A small delay to ensure sorting is fully processed before highlighting
-  Utilities.sleep(500);
-  highlightPotentials();
+  for (let i = 0; i < sortedValues.length; i++) {
+    const rowNum = i + 3; // i=0 is Row 3
+    const category = sortedValues[i][colIndices.sortKey]; 
+    // Use sortedSheet here
+    const rowRangeA1 = sortedSheet.getRange(rowNum, 1, 1, lastCol).getA1Notation(); 
+
+    if (category === 1) expansiveMarketRanges.push(rowRangeA1);
+    else if (category === 2) middleMarketRanges.push(rowRangeA1);
+    else if (category === 3) lowerPotentialRanges.push(rowRangeA1);
+  }
+
+  // Clear all old backgrounds (on new sheet)
+  newDataRegion.setBackground(null);
+  
+  // Apply formatting in batches (on new sheet)
+  if (expansiveMarketRanges.length > 0) sortedSheet.getRangeList(expansiveMarketRanges).setBackground(EXPANSIVE_COLOR);
+  if (middleMarketRanges.length > 0) sortedSheet.getRangeList(middleMarketRanges).setBackground(MIDDLE_MARKET_COLOR);
+  if (lowerPotentialRanges.length > 0) sortedSheet.getRangeList(lowerPotentialRanges).setBackground(LOWER_POTENTIAL_COLOR);
+  Logger.log("Highlighting complete.");
+
+  // --- 8. Show final alert ---
+  Logger.log("--- sortPotentials finished ---");
+  ui.alert(`Sorting and highlighting complete! \n\nA new sheet named 'Sorted Market Analysis' has been created with ${expansiveMarketRanges.length} Expansive, ${middleMarketRanges.length} Medium Value, and ${lowerPotentialRanges.length} Lower Volume rows.`);
 }
 
 
@@ -314,11 +409,11 @@ function sortPotentials() {
  */
 function findHeaderColumns(headers) {
   return {
-    // This is the line that was fixed
     sellThrough: headers.indexOf("Sold/OnMarket (Sell Through Rate) - Bigger the better"),
     totalSold: headers.indexOf("Total # of Sold Properties in 6 months"),
     percentOver200k: headers.indexOf("% (>200k)"),
     percentUnder10k: headers.indexOf("%<10k"),
-    marketCategory: headers.indexOf(CATEGORY_HEADER) // New column to find
+    marketCategory: headers.indexOf(CATEGORY_HEADER),
+    sortKey: headers.indexOf(SORT_KEY_HEADER)
   };
 }

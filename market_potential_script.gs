@@ -16,7 +16,6 @@ const LOWER_NAME = "3 - Lower Volume Market";
 const OTHER_NAME = ""; // Or "Other" if you prefer
 const CATEGORY_HEADER = "Market Category";
 const SORT_KEY_HEADER = "_SortKey"; // Helper column for sorting
-const SORTED_SHEET_NAME = "Sorted Market Analysis"; // Define the output sheet name
 
 /**
  * Creates a custom menu in the spreadsheet when the file is opened.
@@ -24,8 +23,7 @@ const SORTED_SHEET_NAME = "Sorted Market Analysis"; // Define the output sheet n
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Market Analysis')
-    .addItem('Highlight Potentials (On This Sheet)', 'highlightPotentials')
-    .addItem('Sort & Highlight (To New Sheet)', 'sortPotentials')
+    .addItem('Process & Sort Sheet', 'sortPotentials')
     .addToUi();
 }
 
@@ -99,126 +97,9 @@ function getColumnIndices(sheet) {
   return colIndices;
 }
 
-
-/**
- * Main function to find and highlight high and medium potential rows.
- * This function just highlights; it does not sort.
- */
-function highlightPotentials() {
-  const ui = SpreadsheetApp.getUi();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  
-  if (!sheet) {
-    ui.alert("No active sheet found.");
-    return;
-  }
-  
-  if (sheet.getName() === SORTED_SHEET_NAME) {
-    ui.alert("This function highlights the raw data sheet. The sorted sheet is already highlighted.");
-    return;
-  }
-
-  // Get data starting from Row 2 (headers)
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 3) {
-    ui.alert("Not enough data in the sheet to process. This script expects headers on row 2 and data starting on row 3.");
-    return;
-  }
-
-  let colIndices = getColumnIndices(sheet);
-  if (!colIndices) {
-    return; // Stop if ensureHelperColumns failed
-  }
-  
-  // Check if all *other* required columns were found
-  const missingCols = Object.keys(colIndices)
-                           .filter(key => key !== 'marketCategory' && key !== 'sortKey' && colIndices[key] === -1);
-                           
-  if (missingCols.length > 0) {
-    ui.alert(`Error: Could not find the following required columns: ${missingCols.join(", ")}. Please check the header names on Row 2.`);
-    return;
-  }
-  
-  const dataRange = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
-  const values = dataRange.getValues(); // values[0] is headers, values[1] is row 3
-
-  let expansiveMarketRanges = [];
-  let middleMarketRanges = [];
-  let lowerPotentialRanges = [];
-  const categoryValues = []; // Array to hold the category names for batch writing
-  const sortKeyValues = []; // Array to hold the sort keys
-  const numCols = sheet.getLastColumn();
-
-  // Define the range for data rows (excluding headers)
-  const dataRowsRange = sheet.getRange(3, 1, values.length - 1, numCols);
-  // Clear existing background colors first
-  dataRowsRange.setBackground(null);
-
-  // Start loop from row 3 (data starts at index 1 of 'values' array)
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    
-    // Parse values
-    const sellThroughRate = Number(row[colIndices.sellThrough]);
-    const totalSold = Number(row[colIndices.totalSold]);
-    const percentOver200k = Number(row[colIndices.percentOver200k]);
-    const percentUnder10k = Number(row[colIndices.percentUnder10k]);
-    
-    let categoryName = OTHER_NAME;
-    let categoryKey = 4; // 4 = Other (default)
-
-    // Skip rows with invalid data
-    if (!isNaN(sellThroughRate) && !isNaN(totalSold) && !isNaN(percentOver200k) && !isNaN(percentUnder10k)) {
-      const rowNum = i + 2; // +2 because values index 1 is Row 3
-      const rowRangeA1 = sheet.getRange(rowNum, 1, 1, numCols).getA1Notation();
-
-      // Rule 1: Expansive Market
-      if (sellThroughRate > 0.9 && totalSold > 100 && percentOver200k >= 0.4) {
-        expansiveMarketRanges.push(rowRangeA1);
-        categoryName = EXPANSIVE_NAME;
-        categoryKey = 1;
-      } 
-      // Rule 2: Middle Market
-      else if (sellThroughRate > 0.9 && totalSold > 150 && percentUnder10k <= 0.1) {
-        middleMarketRanges.push(rowRangeA1);
-        categoryName = MIDDLE_NAME;
-        categoryKey = 2;
-      }
-      // Rule 3: Lower Potential
-      else if (sellThroughRate > 0.8 && totalSold > 60 && percentUnder10k <= 0.1) {
-        lowerPotentialRanges.push(rowRangeA1);
-        categoryName = LOWER_NAME;
-        categoryKey = 3;
-      }
-    }
-    
-    categoryValues.push([categoryName]); // Add the category name for this row
-    sortKeyValues.push([categoryKey]); // Add the sort key for this row
-  }
-
-  // Apply formatting in batches
-  if (expansiveMarketRanges.length > 0) {
-    sheet.getRangeList(expansiveMarketRanges).setBackground(EXPANSIVE_COLOR);
-  }
-  if (middleMarketRanges.length > 0) {
-    sheet.getRangeList(middleMarketRanges).setBackground(MIDDLE_MARKET_COLOR);
-  }
-  if (lowerPotentialRanges.length > 0) {
-    sheet.getRangeList(lowerPotentialRanges).setBackground(LOWER_POTENTIAL_COLOR);
-  }
-  
-  // Write all category names and sort keys to their columns
-  if (categoryValues.length > 0) {
-    sheet.getRange(3, colIndices.marketCategory + 1, categoryValues.length, 1).setValues(categoryValues);
-    sheet.getRange(3, colIndices.sortKey + 1, sortKeyValues.length, 1).setValues(sortKeyValues);
-  }
-
-  ui.alert(`Highlighting complete! Found ${expansiveMarketRanges.length} Expansive, ${middleMarketRanges.length} Medium Value, and ${lowerPotentialRanges.length} Lower Volume rows.`);
-}
-
 /**
  * Sorts the sheet by potential and outputs to a NEW sheet.
- * THIS VERSION SORTS IN JAVASCRIPT AND WRITES TO A NEW SHEET.
+ * THIS VERSION COPIES THE SHEET to preserve formatting, then sorts the copy.
  */
 function sortPotentials() {
   Logger.log("--- Running sortPotentials ---");
@@ -231,7 +112,16 @@ function sortPotentials() {
     ui.alert("No active sheet found.");
     return;
   }
-  Logger.log("Active sheet: " + activeSheet.getName());
+  
+  const sourceSheetName = activeSheet.getName();
+  const sourceSheetIndex = activeSheet.getIndex(); // Get the position of the original sheet
+  Logger.log("Active sheet: " + sourceSheetName + " at index: " + sourceSheetIndex);
+
+  // Check if it's already a processed sheet
+  if (sourceSheetName.endsWith(" - processed")) {
+    ui.alert("Please run this function on a raw data sheet, not on an already-processed sheet.");
+    return;
+  }
 
   const lastRow = activeSheet.getLastRow();
   const lastCol = activeSheet.getLastColumn();
@@ -240,18 +130,43 @@ function sortPotentials() {
     ui.alert("Not enough data in the sheet to sort. This script expects headers on row 2 and data starting on row 3.");
     return;
   }
+  
+  // Set the new sheet name
+  const newSheetName = `${sourceSheetName} - processed`;
 
-  ui.alert("Categorizing and sorting data... A new sheet named '" + SORTED_SHEET_NAME + "' will be created with the results.");
+  ui.alert("Categorizing and sorting data... A new sheet named '" + newSheetName + "' will be created with the results. This will preserve all formatting.");
 
-  // --- 1. Get Column Indices from SOURCE sheet ---
-  Logger.log("Getting column indices...");
-  let colIndices = getColumnIndices(activeSheet); 
+  // --- 1. Create the NEW Sheet by copying the active one ---
+  Logger.log("Attempting to delete old processed sheet if it exists...");
+  let sortedSheet = spreadsheet.getSheetByName(newSheetName);
+  if (sortedSheet) {
+    spreadsheet.deleteSheet(sortedSheet);
+    SpreadsheetApp.flush(); // Make sure deletion is complete
+    Logger.log("Old sheet deleted.");
+  }
+  
+  Logger.log("Creating new sheet: " + newSheetName + " by copying.");
+  sortedSheet = activeSheet.copyTo(spreadsheet).setName(newSheetName);
+  
+  // Move the new sheet to be right after the original one
+  spreadsheet.setActiveSheet(sortedSheet);
+  spreadsheet.moveActiveSheet(sourceSheetIndex + 1);
+  
+  SpreadsheetApp.flush();
+  Logger.log("New sheet created, activated, and moved to index " + (sourceSheetIndex + 1));
+
+
+  // --- 2. Get Column Indices from NEW sheet (and add helper columns) ---
+  Logger.log("Getting column indices from new sheet...");
+  // Note: getColumnIndices will now run on `sortedSheet`
+  let colIndices = getColumnIndices(sortedSheet); 
   if (!colIndices) {
     Logger.log("Exiting: colIndices is null.");
     return; // Stop if ensureHelperColumns failed (it shows its own alert)
   }
-  Logger.log("Column indices: " + JSON.stringify(colIndices));
-
+  
+  // We need to get the *new* last column in case helper columns were added
+  const newLastCol = sortedSheet.getLastColumn();
   
   const missingCols = Object.keys(colIndices)
                            .filter(key => key !== 'marketCategory' && key !== 'sortKey' && colIndices[key] === -1);
@@ -262,16 +177,14 @@ function sortPotentials() {
     return;
   }
   
-  // --- 2. Read Headers and Data from SOURCE sheet ---
-  Logger.log("Reading header and data values...");
-  const headerValues = activeSheet.getRange(1, 1, 2, lastCol).getValues();
-  const dataValues = activeSheet.getRange(3, 1, lastRow - 2, lastCol).getValues();
-  Logger.log(`Read ${headerValues.length} header rows and ${dataValues.length} data rows.`);
+  // --- 3. Read data, calculate categories, SORT IN MEMORY, and WRITE back ---
+  Logger.log("Reading data to calculate and sort in memory...");
+  // Get the range from row 3 to the last data row
+  const dataRegion = sortedSheet.getRange(3, 1, lastRow - 2, newLastCol);
+  const dataValues = dataRegion.getValues();
+  Logger.log(`Read ${dataValues.length} data rows.`);
   
-  let sortableData = []; // Array to hold objects for sorting
-
-  // --- 3. Calculate and Sort *in memory* (same logic as before) ---
-  Logger.log("Categorizing and sorting in memory...");
+  // Loop 1: Calculate categories and keys
   for (let i = 0; i < dataValues.length; i++) {
     const row = dataValues[i];
     
@@ -301,94 +214,56 @@ function sortPotentials() {
       }
     }
     
-    // Update the row *in memory* with the new category data
+    // Write the category and key *into the data array*
     row[colIndices.marketCategory] = categoryName;
     row[colIndices.sortKey] = categoryKey;
+  }
+  
+  // Loop 2: Sort the data array in memory
+  Logger.log("Sorting data in memory...");
+  dataValues.sort((a, b) => {
+    const keyA = a[colIndices.sortKey];
+    const keyB = b[colIndices.sortKey];
     
-    // Add to our sortable array
-    sortableData.push({
-      row: row,
-      sortKey: categoryKey,
-      sellThrough: sellThroughRate
-    });
-  }
-
-  // Sort the data *in memory*
-  sortableData.sort((a, b) => {
-    if (a.sortKey !== b.sortKey) {
-      return a.sortKey - b.sortKey; // Ascending by category (1, 2, 3)
+    // Primary sort: Category Key (1, 2, 3...)
+    if (keyA !== keyB) {
+      return keyA - keyB;
     }
-    // If keys are the same, sort by sell-through descending
-    return b.sellThrough - a.sellThrough;
+    
+    // Secondary sort: Sell Through Rate (High to Low)
+    const sellThroughA = a[colIndices.sellThrough];
+    const sellThroughB = b[colIndices.sellThrough];
+    return sellThroughB - sellThroughA;
   });
+  Logger.log("In-memory sort complete.");
 
-  // Extract the sorted row data
-  const sortedValues = sortableData.map(item => item.row); // This is our final data
-  Logger.log(`Sort complete. ${sortedValues.length} rows sorted.`);
-
-
-  // --- 4. Create the NEW Sheet ---
-  Logger.log("Attempting to delete old sorted sheet if it exists...");
-  let sortedSheet = spreadsheet.getSheetByName(SORTED_SHEET_NAME);
-  if (sortedSheet) {
-    spreadsheet.deleteSheet(sortedSheet);
-    SpreadsheetApp.flush(); // Make sure deletion is complete
-    Logger.log("Old sheet deleted.");
-  }
-  
-  Logger.log("Creating new sheet: " + SORTED_SHEET_NAME);
-  sortedSheet = spreadsheet.insertSheet(SORTED_SHEET_NAME);
-  spreadsheet.setActiveSheet(sortedSheet);
-  Logger.log("New sheet created and activated.");
+  // Loop 3: Write the sorted data back to the sheet
+  Logger.log("Writing sorted data back to sheet...");
+  dataRegion.setValues(dataValues);
+  SpreadsheetApp.flush();
+  Logger.log("Sorted data written.");
 
 
-  // --- 5. Write Headers and Sorted Data to NEW Sheet ---
-  if (sortedValues.length > 0) {
-    Logger.log("Writing headers to new sheet...");
-    // Write Headers
-    sortedSheet.getRange(1, 1, 2, lastCol).setValues(headerValues);
-    Logger.log("Writing sorted data to new sheet...");
-    // Write Data
-    sortedSheet.getRange(3, 1, sortedValues.length, lastCol).setValues(sortedValues);
-    Logger.log("Data write complete. Flushing sheet.");
-    SpreadsheetApp.flush(); // FORCE the sheet to update
-  } else {
-    Logger.log("Exiting: No data rows found to sort.");
-    ui.alert("No data rows found to sort.");
-    return;
-  }
-
-  // --- 6. Format the NEW Sheet ---
-  Logger.log("Formatting new sheet (freezing panes, hiding column)...");
-  try {
-    sortedSheet.setFrozenRows(2);
-    sortedSheet.setFrozenColumns(1);
-    const sortKeyColNum = colIndices.sortKey + 1;
-    sortedSheet.hideColumns(sortKeyColNum);
-  } catch (e) {
-     Logger.log("Error formatting new sheet: " + e.message);
-  }
-  
-  // --- 7. Apply Highlights on NEW Sheet ---
+  // --- 4. Apply Highlights on NEW Sheet ---
   Logger.log("Applying highlights to new sheet...");
+  
+  // We already have the sorted data, just need to build range lists
   let expansiveMarketRanges = [];
   let middleMarketRanges = [];
   let lowerPotentialRanges = [];
-  const newDataRegion = sortedSheet.getRange(3, 1, sortedValues.length, lastCol);
 
-  for (let i = 0; i < sortedValues.length; i++) {
+  for (let i = 0; i < dataValues.length; i++) {
     const rowNum = i + 3; // i=0 is Row 3
-    const category = sortedValues[i][colIndices.sortKey]; 
-    // Use sortedSheet here
-    const rowRangeA1 = sortedSheet.getRange(rowNum, 1, 1, lastCol).getA1Notation(); 
+    const category = dataValues[i][colIndices.sortKey];
+    const rowRangeA1 = sortedSheet.getRange(rowNum, 1, 1, newLastCol).getA1Notation(); 
 
     if (category === 1) expansiveMarketRanges.push(rowRangeA1);
     else if (category === 2) middleMarketRanges.push(rowRangeA1);
     else if (category === 3) lowerPotentialRanges.push(rowRangeA1);
   }
 
-  // Clear all old backgrounds (on new sheet)
-  newDataRegion.setBackground(null);
+  // Clear all old backgrounds (on new sheet) - this is safe, formats are preserved
+  dataRegion.setBackground(null);
   
   // Apply formatting in batches (on new sheet)
   if (expansiveMarketRanges.length > 0) sortedSheet.getRangeList(expansiveMarketRanges).setBackground(EXPANSIVE_COLOR);
@@ -396,9 +271,32 @@ function sortPotentials() {
   if (lowerPotentialRanges.length > 0) sortedSheet.getRangeList(lowerPotentialRanges).setBackground(LOWER_POTENTIAL_COLOR);
   Logger.log("Highlighting complete.");
 
-  // --- 8. Show final alert ---
+
+  // --- 5. Format the NEW Sheet ---
+  Logger.log("Formatting new sheet (freezing panes, hiding column)...");
+  try {
+    // Remove any filters that might have been copied
+    const filter = sortedSheet.getFilter();
+    if (filter) {
+      filter.remove();
+    }
+    // Unfreeze all panes (in case of odd copy behavior)
+    sortedSheet.unfreeze();
+    SpreadsheetApp.flush();
+
+    // Set the frozen panes as requested
+    sortedSheet.setFrozenRows(2);
+    sortedSheet.setFrozenColumns(1);
+
+    // Hide the helper sort key column
+    sortedSheet.hideColumns(colIndices.sortKey + 1);
+  } catch (e) {
+     Logger.log("Error formatting new sheet: " + e.message);
+  }
+  
+  // --- 6. Show final alert ---
   Logger.log("--- sortPotentials finished ---");
-  ui.alert(`Sorting and highlighting complete! \n\nA new sheet named 'Sorted Market Analysis' has been created with ${expansiveMarketRanges.length} Expansive, ${middleMarketRanges.length} Medium Value, and ${lowerPotentialRanges.length} Lower Volume rows.`);
+  ui.alert(`Processing complete! \n\nA new sheet named '${newSheetName}' has been created with all original formatting preserved.`);
 }
 
 

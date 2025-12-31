@@ -162,6 +162,16 @@ function processRealtorList() {
     ui.alert('Error: A sheet named "Realtors-RawList" was not found.'); return;
   }
   
+  // Ask user for outreach type
+  const outreachResponse = ui.alert('Realtor Outreach Type', 'Is this for BPO Outreach?\n\nYes = BPO Outreach\nNo = Realtor Buyer Outreach', ui.ButtonSet.YES_NO);
+  let realtorTriggerTag = '';
+  
+  if (outreachResponse == ui.Button.YES) {
+    realtorTriggerTag = '[DISP] Trigger: Start BPO Outreach';
+  } else {
+    realtorTriggerTag = '[DISP] Trigger: Start Realtors (Buyer)';
+  }
+  
   ui.alert(`Processing Realtor list for campaign: ${campaignInfo.campaignTag}. This may take a moment...`);
   let targetSheet = ss.getSheetByName(targetSheetName);
   if (targetSheet) targetSheet.clear();
@@ -191,7 +201,7 @@ function processRealtorList() {
         firstName, lastName, companyName,
         email: row[headerMap['Email Address']],
         phone: row[headerMap['Mobile Phone Number']],
-        tags: new Set([campaignInfo.campaignTag, 'Type: Realtor', `County: ${campaignInfo.propCounty}`]),
+        tags: new Set([campaignInfo.campaignTag, 'Type: Realtor', `County: ${campaignInfo.propCounty}`, realtorTriggerTag]),
         recentlySold: []
       };
       if (state) newRealtor.tags.add(`State: ${state}`);

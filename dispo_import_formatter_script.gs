@@ -99,7 +99,7 @@ function getAndConfirmCampaignInfo() {
     // 3A. IF FOUND: Map and confirm the data with the user
     campaignInfo = {
       streetAddressKey: activeRowData[col.key],
-      campaignTag:      activeRowData[col.campaignTag],
+      campaignTag:      activeRowData[col.campaignTag].startsWith('Campaign: ') ? activeRowData[col.campaignTag] : `Campaign: ${activeRowData[col.campaignTag]}`,
       propAddress:      activeRowData[col.propAddress],
       propAPN:          activeRowData[col.propAPN],
       propCounty:       activeRowData[col.propCounty],
@@ -191,7 +191,7 @@ function processRealtorList() {
         firstName, lastName, companyName,
         email: row[headerMap['Email Address']],
         phone: row[headerMap['Mobile Phone Number']],
-        tags: new Set([campaignInfo.campaignTag, 'Type: Realtor']),
+        tags: new Set([campaignInfo.campaignTag, 'Type: Realtor', `County: ${campaignInfo.propCounty}`]),
         recentlySold: []
       };
       if (state) newRealtor.tags.add(`State: ${state}`);
@@ -289,7 +289,7 @@ function processNeighborList() {
         phone2: row[headerMap['Phone 2']],
         mailingStreet: street, mailingCity: city, mailingState: state, mailingZip: zip,
         ownedProperty: row[headerMap['Property Address']],
-        tags: new Set([campaignInfo.campaignTag, 'Type: Neighbor'])
+        tags: new Set([campaignInfo.campaignTag, 'Type: Neighbor', `County: ${campaignInfo.propCounty}`])
       };
       
       if (state) newNeighbor.tags.add(`State: ${state}`);
@@ -371,7 +371,7 @@ function processPropwireExport() {
         mailingCity: row[headerMap['Owner Mailing City']],
         mailingState: mailingState,
         mailingZip: row[headerMap['Owner Mailing Zip']],
-        tags: new Set([campaignInfo.campaignTag,'Type: Investor', 'Source: Propwire']),
+        tags: new Set([campaignInfo.campaignTag,'Type: Investor', 'Source: Propwire', `County: ${campaignInfo.propCounty}`]),
         ownedProperties: []
       };
       

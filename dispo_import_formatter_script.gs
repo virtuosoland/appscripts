@@ -289,7 +289,7 @@ function processNeighborList() {
         phone2: row[headerMap['Phone 2']],
         mailingStreet: street, mailingCity: city, mailingState: state, mailingZip: zip,
         ownedProperty: row[headerMap['Property Address']],
-        tags: new Set([campaignInfo.campaignTag, 'Type: Neighbor', `County: ${campaignInfo.propCounty}`])
+        tags: new Set([campaignInfo.campaignTag, 'Type: Neighbor', `County: ${campaignInfo.propCounty}`, '[DISP] Trigger: Neighbor Outreach'])
       };
       
       if (state) newNeighbor.tags.add(`State: ${state}`);
@@ -371,7 +371,7 @@ function processPropwireExport() {
         mailingCity: row[headerMap['Owner Mailing City']],
         mailingState: mailingState,
         mailingZip: row[headerMap['Owner Mailing Zip']],
-        tags: new Set([campaignInfo.campaignTag,'Type: Investor', 'Source: Propwire', `County: ${campaignInfo.propCounty}`]),
+        tags: new Set([campaignInfo.campaignTag,'Type: Investor', 'Source: Propwire', `County: ${campaignInfo.propCounty}`, '[DISP] Trigger: Investor Outreach']),
         ownedProperties: []
       };
       

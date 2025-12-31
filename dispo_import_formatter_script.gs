@@ -40,12 +40,13 @@ function getAndConfirmCampaignInfo() {
     propCounty: 4,  // E
     propState: 5,   // F
     propAcreage: 6, // G
-    propPrice: 7    // H
+    propPrice: 7,   // H
+    pebbleURL: 8    // I
   };
 
   let activeRowData;
   try {
-    activeRowData = dataSheet.getRange(2, 1, 1, 8).getValues()[0];
+    activeRowData = dataSheet.getRange(2, 1, 1, 9).getValues()[0];
   } catch (e) {
     ui.alert('Error reading "Property Data" sheet. Please ensure it has at least 2 rows.');
     return null;
@@ -56,7 +57,7 @@ function getAndConfirmCampaignInfo() {
   const campaignTag = activeRowData[col.campaignTag];
 
   // --- NEW LOGIC: Check if data is incomplete ---
-  if (!streetAddressKey || !campaignTag) {
+  if (!streetAddressKey || !campaignTag || !activeRowData[col.pebbleURL]) {
     // 3B. IF INCOMPLETE OR BLANK: Prompt user to enter the data once
     ui.alert('No active property found (or data in Row 2 is incomplete).\n\nPlease enter the property details. This will be saved to Row 2 for future use.');
     
@@ -67,27 +68,28 @@ function getAndConfirmCampaignInfo() {
     };
     
     try {
-      const fullAddress = getResponse('Step 1 of 7: Full Property Address', 'Enter the full property address (e.g., 123 Main St, Winston Salem, NC 27105):');
+      const fullAddress = getResponse('Step 1 of 8: Full Property Address', 'Enter the full property address (e.g., 123 Main St, Winston Salem, NC 27105):');
       const parsedKey = fullAddress.split(',')[0].trim();
       
       campaignInfo = {
         streetAddressKey: parsedKey,
         campaignTag:      `Campaign: ${parsedKey}`,
         propAddress:      fullAddress,
-        propAPN:          getResponse('Step 2 of 7: Property APN', 'Enter the property APN (e.g., 123-45-678):'),
-        propCounty:       getResponse('Step 3 of 7: Property County', 'Enter the property county (e.g., Forsyth):'),
-        propState:        getResponse('Step 4 of 7: Property State', 'Enter the property state (e.g., NC):'),
-        propAcreage:      getResponse('Step 5 of 7: Property Acreage', 'Enter the property acreage (e.g., 1.5):'),
-        propPrice:        getResponse('Step 6 of 7: Asking Price', 'Enter the asking price (e.g., $50,000):')
+        propAPN:          getResponse('Step 2 of 8: Property APN', 'Enter the property APN (e.g., 123-45-678):'),
+        propCounty:       getResponse('Step 3 of 8: Property County', 'Enter the property county (e.g., Forsyth):'),
+        propState:        getResponse('Step 4 of 8: Property State', 'Enter the property state (e.g., NC):'),
+        propAcreage:      getResponse('Step 5 of 8: Property Acreage', 'Enter the property acreage (e.g., 1.5):'),
+        propPrice:        getResponse('Step 6 of 8: Asking Price', 'Enter the asking price (e.g., $50,000):'),
+        pebbleURL:        getResponse('Step 7 of 8: Pebble Deal URL', 'Enter the Pebble deal URL (optional):')
       };
       
       // Save this new data back to Row 2 of the Property Data sheet
       const newRowData = [
         campaignInfo.streetAddressKey, campaignInfo.campaignTag, campaignInfo.propAddress,
         campaignInfo.propAPN, campaignInfo.propCounty, campaignInfo.propState,
-        campaignInfo.propAcreage, campaignInfo.propPrice
+        campaignInfo.propAcreage, campaignInfo.propPrice, campaignInfo.pebbleURL
       ];
-      dataSheet.getRange(2, 1, 1, 8).setValues([newRowData]);
+      dataSheet.getRange(2, 1, 1, 9).setValues([newRowData]);
       ui.alert('New property data has been saved to Row 2 of the "Property Data" sheet.');
       
     } catch (e) {
@@ -105,7 +107,8 @@ function getAndConfirmCampaignInfo() {
       propCounty:       activeRowData[col.propCounty],
       propState:        activeRowData[col.propState],
       propAcreage:      activeRowData[col.propAcreage],
-      propPrice:        activeRowData[col.propPrice]
+      propPrice:        activeRowData[col.propPrice],
+      pebbleURL:        activeRowData[col.pebbleURL]
     };
   }
   
@@ -115,7 +118,8 @@ function getAndConfirmCampaignInfo() {
                               `Campaign: ${campaignInfo.campaignTag}\n` +
                               `Address: ${campaignInfo.propAddress}\n` +
                               `APN: ${campaignInfo.propAPN}\n` +
-                              `Price: ${campaignInfo.propPrice}\n\n` +
+                              `Price: ${campaignInfo.propPrice}\n` +
+                              `Pebble URL: ${campaignInfo.pebbleURL || 'Not specified'}\n\n` +
                               `Is this correct?`;
                                 
   const userResponse = ui.alert(confirmationMessage, ui.ButtonSet.OK_CANCEL);
@@ -143,7 +147,8 @@ const FUB_HEADERS = [
   '[DISP] Property County', 
   '[DISP] Property State', 
   '[DISP] Property Acreage', 
-  '[DISP] Asking Price'
+  '[DISP] Asking Price',
+  'Pebble Deal URL'
 ];
 
 // =======================================================================================
@@ -225,7 +230,8 @@ function processRealtorList() {
     r.firstName, r.lastName, r.companyName, r.email, r.phone, '', '', '', '', '', '',
     Array.from(r.tags).join(','), '', r.recentlySold.join('\n'),
     campaignInfo.propAddress, campaignInfo.propAPN, campaignInfo.propCounty,
-    campaignInfo.propState, campaignInfo.propAcreage, campaignInfo.propPrice
+    campaignInfo.propState, campaignInfo.propAcreage, campaignInfo.propPrice,
+    campaignInfo.pebbleURL
   ]);
 
   if (outputData.length > 0) {
@@ -314,7 +320,8 @@ function processNeighborList() {
   const outputData = Array.from(neighbors.values()).map(n => [
     n.firstName, n.lastName, n.companyName, n.email, n.phone1, n.phone2, '', n.mailingStreet, n.mailingCity, n.mailingState, n.mailingZip, Array.from(n.tags).join(','), n.ownedProperty, '',
     campaignInfo.propAddress, campaignInfo.propAPN, campaignInfo.propCounty,
-    campaignInfo.propState, campaignInfo.propAcreage, campaignInfo.propPrice
+    campaignInfo.propState, campaignInfo.propAcreage, campaignInfo.propPrice,
+    campaignInfo.pebbleURL
   ]);
 
   if (outputData.length > 0) {
@@ -408,7 +415,8 @@ function processPropwireExport() {
   const outputData = Array.from(contacts.values()).map(c => [
     c.firstName, c.lastName, c.companyName, c.email, c.phone1, c.phone2, c.phone3, c.mailingStreet, c.mailingCity, c.mailingState, c.mailingZip, Array.from(c.tags).join(','), c.ownedProperties.join('\n'), '',
     campaignInfo.propAddress, campaignInfo.propAPN, campaignInfo.propCounty,
-    campaignInfo.propState, campaignInfo.propAcreage, campaignInfo.propPrice
+    campaignInfo.propState, campaignInfo.propAcreage, campaignInfo.propPrice,
+    campaignInfo.pebbleURL
   ]);
 
   if (outputData.length > 0) {

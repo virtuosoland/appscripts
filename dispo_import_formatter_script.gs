@@ -113,6 +113,7 @@ const FUB_HEADERS = [
 /**
  * 1. SCRIPT FOR REALTOR LIST
  * Dynamically finds headers and skips empty/title rows.
+ * Updates Recently Sold based on SALE TYPE (Active/Sold).
  */
 function processRealtorList() {
   const campaignInfo = getAndConfirmCampaignInfo();
@@ -178,9 +179,20 @@ function processRealtorList() {
     }
 
     const r = realtors.get(agentName);
-    const addr = row[map['ADDRESS']], city = row[map['CITY']], st = row[map['STATE OR PROVINCE']], zip = row[map['ZIP OR POSTAL CODE']];
-    if (addr && city) {
-      r.recentlySold.push(`${addr}, ${city}, ${st} ${zip}`);
+    const saleType = (row[map['SALE TYPE']] || "").toString().trim();
+    const address = row[map['ADDRESS']];
+    const city = row[map['CITY']];
+    const state = row[map['STATE OR PROVINCE']];
+    const zip = row[map['ZIP OR POSTAL CODE']];
+    
+    if (address && city) {
+      let prefix = "";
+      if (saleType === "MLS Listing") {
+        prefix = "(Active) - ";
+      } else if (saleType === "PAST SALE") {
+        prefix = "(Sold) - ";
+      }
+      r.recentlySold.push(`${prefix}${address}, ${city}, ${state} ${zip}`);
     }
   });
 
